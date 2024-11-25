@@ -1,21 +1,5 @@
 import logging
-
-def setup_logger():
-    logging.basicConfig(level=logging.DEBUG, format='%(message)s')
-
-# Augmented grammar with productions stored as tuples of symbols
-cfg = {
-    "S'": [('S',)],  # Augmented start symbol
-    'S': [('S', 'A'), ('S', 'B'), ('a',)],
-    'A': [('S', '+')],
-    'B': [('S', '-')]
-}
-
-def is_non_terminal(symbol):
-    return symbol.isupper() or symbol == "S'"
-
-def is_terminal(symbol):
-    return not is_non_terminal(symbol)
+from .symbols import is_terminal, is_non_terminal
 
 class SLRParser:
     def __init__(self, cfg):
@@ -97,29 +81,29 @@ class SLRParser:
         return self.build_closure(goto)
 
     def build_states(self):
-        logging.info('=========== Building states... ===========')
+        logging.debug('=========== Building states... ===========')
         start_item = ("S'", self.cfg["S'"][0], 0)
         start_closure = self.build_closure({start_item})
         self.states.append(start_closure)
-        logging.info(f'State 0: {start_closure}')
+        logging.debug(f'State 0: {start_closure}')
         states_added = True
         while states_added:
             states_added = False
             for i, state in enumerate(self.states):
-                logging.info(f'Processing state {i}...')
+                logging.debug(f'Processing state {i}...')
                 symbols = set()
                 for (left, production, dot) in state:
-                    logging.info(f'Item: {left} -> {" ".join(production[:dot])}.{" ".join(production[dot:])}')
+                    logging.debug(f'Item: {left} -> {" ".join(production[:dot])}.{" ".join(production[dot:])}')
                     if dot < len(production):
-                        logging.info(f'Next symbol: {production[dot]}')
+                        logging.debug(f'Next symbol: {production[dot]}')
                         symbols.add(production[dot])
-                logging.info(f'Symbols: {symbols}')
+                logging.debug(f'Symbols: {symbols}')
                 for symbol in symbols:
-                    logging.info(f'Processing symbol {symbol}...')
+                    logging.debug(f'Processing symbol {symbol}...')
                     goto_state = self.build_goto(state, symbol)
-                    logging.info(f'Goto state: {goto_state}')
+                    logging.debug(f'Goto state: {goto_state}')
                     if goto_state and goto_state not in self.states:
-                        logging.info(f'Adding state {len(self.states)}: {goto_state}')
+                        logging.debug(f'Adding state {len(self.states)}: {goto_state}')
                         self.states.append(goto_state)
                         states_added = True
                     self.transitions[(i, symbol)] = self.states.index(goto_state)
@@ -153,13 +137,13 @@ class SLRParser:
             symbol = input_string[index]
             action = self.action.get((state, symbol))
             if action is None:
-                print(f'Error: No action for state {state}, symbol {symbol}')
+                logging.error(f'Error: No action for state {state}, symbol {symbol}')
                 return None
             op, val = action
             if op == 's':
                 stack.append(val)
                 index += 1
-                print(f'Shift to {val}')
+                logging.debug(f'Shift to {val}')
             elif op == 'r':
                 left, production = val
                 for _ in production:
@@ -167,12 +151,12 @@ class SLRParser:
                 state = stack[-1]
                 goto_state = self.goto.get((state, left))
                 if goto_state is None:
-                    print(f'Error: No goto for state {state}, symbol {left}')
+                    logging.error(f'Error: No goto for state {state}, symbol {left}')
                     return None
                 stack.append(goto_state)
-                print(f'Reduce by {left} -> {" ".join(production)}')
+                logging.debug(f'Reduce by {left} -> {" ".join(production)}')
             elif op == 'acc':
-                print('Accepted')
+                logging.info('Accepted')
                 return True
 
     def print_tables(self):
@@ -197,9 +181,3 @@ class SLRParser:
         logging.info('Goto:')
         for (i, symbol), s in self.goto.items():
             logging.info(f'{i}, {symbol}: {s}')
-
-if __name__ == '__main__':
-    setup_logger()
-    parser = SLRParser(cfg)
-    parser.print_tables()
-    parser.parse('aaaa+++')
