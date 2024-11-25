@@ -5,62 +5,92 @@ from functools import partial
 class ParserUI:
     def __init__(self, root, parsers, default_cfg):
         self.root = root
-        self.parsers = parsers 
+        self.parsers = parsers
         self.default_cfg = default_cfg
-        self.current_parser = None 
-        self.parser_class = None 
+        self.current_parser = None
+        self.parser_class = None
 
         root.title("Parser UI: SLR, CLR, LALR")
         root.geometry("900x700")
         root.resizable(False, False)
-        ttk.Label(root, text="Parser UI", font=("Helvetica", 18)).pack(pady=10)
-        parser_frame = ttk.Frame(root)
+        root.configure(bg="#f5f5f5")
+
+        ttk.Label(
+            root,
+            text="Parser UI: SLR, CLR, LALR",
+            font=("Helvetica", 20, "bold"),
+            background="#f5f5f5",
+            foreground="#333"
+        ).pack(pady=10)
+
+        parser_frame = ttk.Frame(root, padding=10)
         parser_frame.pack(pady=10)
-        ttk.Label(parser_frame, text="Select Parser:").grid(row=0, column=0, padx=5, pady=5)
-        self.parser_selection = ttk.Combobox(parser_frame, values=list(self.parsers.keys()), state="readonly")
-        self.parser_selection.grid(row=0, column=1, padx=5, pady=5)
+        ttk.Label(parser_frame, text="Select Parser:", font=("Helvetica", 12)).grid(row=0, column=0, padx=5, pady=5)
+        self.parser_selection = ttk.Combobox(
+            parser_frame,
+            values=list(self.parsers.keys()),
+            state="readonly",
+            font=("Helvetica", 10)
+        )
+        self.parser_selection.grid(row=0, column=1, padx=10, pady=5)
         self.parser_selection.current(0)
         self.parser_selection.bind("<<ComboboxSelected>>", self.on_parser_change)
 
-        self.grammar_frame = ttk.Labelframe(root, text="Grammar")
+        self.grammar_frame = ttk.Labelframe(
+            root, text="Augmented Grammar", padding=10, style="My.TLabelframe"
+        )
         self.grammar_frame.pack(padx=10, pady=10, fill="x")
-        self.grammar_text = tk.Text(self.grammar_frame, height=8)
+        self.grammar_text = tk.Text(self.grammar_frame, height=8, font=("Courier", 12))
         self.grammar_text.pack(padx=10, pady=5, fill="both", expand=True)
         self.grammar_text.insert("1.0", self.format_cfg(self.default_cfg))
 
-        self.input_frame = ttk.Frame(root)
+        self.input_frame = ttk.Frame(root, padding=10)
         self.input_frame.pack(padx=10, pady=10, fill="x")
-        ttk.Label(self.input_frame, text="Input String:").grid(row=0, column=0, padx=5, pady=5)
-        self.input_entry = ttk.Entry(self.input_frame, width=50)
-        self.input_entry.grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(self.input_frame, text="Parse", command=self.run_parser).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Label(self.input_frame, text="Input String:", font=("Helvetica", 12)).grid(row=0, column=0, padx=5, pady=5)
+        self.input_entry = ttk.Entry(self.input_frame, width=50, font=("Helvetica", 10))
+        self.input_entry.grid(row=0, column=1, padx=10, pady=5)
+        parse_button = ttk.Button(self.input_frame, text="Parse", command=self.run_parser)
+        parse_button.grid(row=0, column=2, padx=10, pady=5)
 
         self.output_tabs = ttk.Notebook(root)
         self.output_tabs.pack(padx=10, pady=10, fill="both", expand=True)
 
-        self.steps_tab = ttk.Frame(self.output_tabs)
-        self.action_table_tab = ttk.Frame(self.output_tabs)
-        self.goto_table_tab = ttk.Frame(self.output_tabs)
+        self.steps_tab = ttk.Frame(self.output_tabs, padding=10)
+        self.action_table_tab = ttk.Frame(self.output_tabs, padding=10)
+        self.goto_table_tab = ttk.Frame(self.output_tabs, padding=10)
         self.output_tabs.add(self.steps_tab, text="Parsing Steps")
         self.output_tabs.add(self.action_table_tab, text="Action Table")
         self.output_tabs.add(self.goto_table_tab, text="Goto Table")
 
-        self.steps_text = tk.Text(self.steps_tab, state="disabled")
+        self.steps_text = tk.Text(self.steps_tab, state="disabled", wrap="word", font=("Courier", 12))
         self.steps_text.pack(padx=10, pady=10, fill="both", expand=True)
 
-        self.action_tree = ttk.Treeview(self.action_table_tab, columns=("State", "Symbol", "Action"), show="headings")
+        self.action_tree = ttk.Treeview(
+            self.action_table_tab,
+            columns=("State", "Symbol", "Action"),
+            show="headings"
+        )
         self.action_tree.heading("State", text="State")
         self.action_tree.heading("Symbol", text="Symbol")
         self.action_tree.heading("Action", text="Action")
         self.action_tree.pack(padx=10, pady=10, fill="both", expand=True)
 
-        self.goto_tree = ttk.Treeview(self.goto_table_tab, columns=("State", "Symbol", "Goto"), show="headings")
+        self.goto_tree = ttk.Treeview(
+            self.goto_table_tab,
+            columns=("State", "Symbol", "Goto"),
+            show="headings"
+        )
         self.goto_tree.heading("State", text="State")
         self.goto_tree.heading("Symbol", text="Symbol")
         self.goto_tree.heading("Goto", text="Goto")
         self.goto_tree.pack(padx=10, pady=10, fill="both", expand=True)
 
         self.on_parser_change()
+
+        style = ttk.Style()
+        style.configure("My.TLabelframe", background="#f5f5f5", font=("Helvetica", 12, "bold"))
+        style.configure("TButton", font=("Helvetica", 10))
+        style.configure("Treeview.Heading", font=("Helvetica", 10, "bold"))
 
     def format_cfg(self, cfg):
         formatted = ""
@@ -71,7 +101,6 @@ class ParserUI:
     def on_parser_change(self, event=None):
         parser_name = self.parser_selection.get()
         self.parser_class = self.parsers[parser_name]
-        messagebox.showinfo("Parser Changed", f"Switched to {parser_name} Parser")
 
     def run_parser(self):
         try:

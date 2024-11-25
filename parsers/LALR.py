@@ -4,11 +4,8 @@ from .CLR import CLRParser
 
 class LALRParser(CLRParser):
     def __init__(self, cfg):
+        self.states_raw = []  # To keep raw states before merging
         super().__init__(cfg)
-        self.merged_states = []
-        self.merged_transitions = {}
-        self.merged_action = {}
-        self.merged_goto = {}
         self.merge_states()
 
     def merge_states(self):
@@ -20,79 +17,90 @@ class LALRParser(CLRParser):
                 core_map[core] = []
             core_map[core].append(i)
 
-        # Merge states with the same core
-        for merged_state_indices in core_map.values():
-            merged_state = set()
-            for index in merged_state_indices:
-                merged_state.update(self.states[index])
-            self.merged_states.append(merged_state)
+        # Mapping from old state indices to new merged state indices
+        state_mapping = {}
+        new_states = []
+        for indices in core_map.values():
+            # Merge lookaheads for identical items
+            merged_items = {}
+            for index in indices:
+                for item in self.states[index]:
+                    key = (item[0], item[1], item[2])
+                    if key not in merged_items:
+                        merged_items[key] = set()
+                    merged_items[key].add(item[3])
+            # Convert back to set of items
+            new_state = set()
+            for key, lookaheads in merged_items.items():
+                for lookahead in lookaheads:
+                    new_state.add((*key, lookahead))
+            new_state_index = len(new_states)
+            for index in indices:
+                state_mapping[index] = new_state_index
+            new_states.append(new_state)
+        self.states = new_states
 
         # Update transitions
+        new_transitions = {}
         for (state_index, symbol), target_index in self.transitions.items():
-            merged_source = self.get_merged_state_index(state_index)
-            merged_target = self.get_merged_state_index(target_index)
-            self.merged_transitions[(merged_source, symbol)] = merged_target
+            merged_source = state_mapping[state_index]
+            merged_target = state_mapping[target_index]
+            new_transitions[(merged_source, symbol)] = merged_target
+        self.transitions = new_transitions
 
-        # Update action and goto tables
-        for (state_index, symbol), action in self.action.items():
-            merged_source = self.get_merged_state_index(state_index)
-            self.merged_action[(merged_source, symbol)] = action
+        # Rebuild action and goto tables based on merged states
+        self.action = {}
+        self.goto = {}
+        for i, state in enumerate(self.states):
+            for (left, production, dot, lookahead) in state:
+                if dot < len(production):
+                    symbol = production[dot]
+                    if is_terminal(symbol):
+                        s = self.transitions.get((i, symbol))
+                        if s is not None:
+                            key = (i, symbol)
+                            # Handle shift conflicts
+                            if key in self.action and self.action[key] != ('s', s):
+                                raise ValueError(f'Conflict at state {i}, symbol {symbol}')
+                            self.action[key] = ('s', s)
+                    else:
+                        s = self.transitions.get((i, symbol))
+                        if s is not None:
+                            self.goto[(i, symbol)] = s
+                else:
+                    if left == "S'":
+                        self.action[(i, '$')] = ('acc', None)
+                    else:
+                        key = (i, lookahead)
+                        # Handle reduce conflicts
+                        if key in self.action and self.action[key] != ('r', (left, production)):
+                            raise ValueError(f'Conflict at state {i}, symbol {lookahead}')
+                        self.action[key] = ('r', (left, production))
 
-        for (state_index, symbol), target_index in self.goto.items():
-            merged_source = self.get_merged_state_index(state_index)
-            merged_target = self.get_merged_state_index(target_index)
-            self.merged_goto[(merged_source, symbol)] = merged_target
-
-    def get_merged_state_index(self, state_index):
-        for i, merged_state in enumerate(self.merged_states):
-            if self.states[state_index].issubset(merged_state):
-                return i
-        return None
+    def build_states(self):
+        logging.info('=========== Building states... ===========')
+        start_item = ("S'", self.cfg["S'"][0], 0, '$')
+        start_closure = self.build_closure({start_item})
+        self.states = [start_closure]
+        logging.info(f'State 0: {start_closure}')
+        states_added = True
+        while states_added:
+            states_added = False
+            for i, state in enumerate(self.states):
+                symbols = set()
+                for (left, production, dot, lookahead) in state:
+                    if dot < len(production):
+                        symbols.add(production[dot])
+                for symbol in symbols:
+                    goto_state = self.build_goto(state, symbol)
+                    # Check if this goto_state is already in self.states
+                    if goto_state in self.states:
+                        s = self.states.index(goto_state)
+                    else:
+                        s = len(self.states)
+                        self.states.append(goto_state)
+                        states_added = True
+                    self.transitions[(i, symbol)] = s
 
     def parse(self, string):
-        stack = [0]
-        input_string = list(string) + ['$']
-        index = 0
-        while True:
-            state = stack[-1]
-            symbol = input_string[index]
-            action = self.merged_action.get((state, symbol))
-            if action is None:
-                logging.error(f'Error: No action for state {state}, symbol {symbol}')
-                return None
-            op, val = action
-            if op == 's':
-                stack.append(val)
-                index += 1
-                logging.debug(f'Shift to {val}')
-            elif op == 'r':
-                left, production = val
-                for _ in production:
-                    stack.pop()
-                state = stack[-1]
-                goto_state = self.merged_goto.get((state, left))
-                if goto_state is None:
-                    logging.error(f'Error: No goto for state {state}, symbol {left}')
-                    return None
-                stack.append(goto_state)
-                logging.debug(f'Reduce by {left} -> {" ".join(production)}')
-            elif op == 'acc':
-                logging.info('Accepted')
-                return True
-
-    def print_tables(self):
-        logging.info('Merged States:')
-        for i, state in enumerate(self.merged_states):
-            str_state = ''
-            for item in state:
-                str_state += f'[{item[0]}->{" ".join(item[1][:item[2]])}.{" ".join(item[1][item[2]:])}, {item[3]}], '
-            logging.info(f'{i}: {str_state}')
-        logging.info('Merged Transitions:')
-        for (i, symbol), s in self.merged_transitions.items():
-            logging.info(f'{i} --{symbol}--> {s}')
-        logging.info('Merged Action:')
-        for (i, symbol), (op, val) in self.merged_action.items():
-            logging.info(f'{i}, {symbol}: {op} {val}')
-        logging.info('Merged Goto:')
-        for (i, symbol), s in self.merged_goto.items():
-            logging.info(f'{i}, {symbol}: {s}')
+        return super().parse(string)
